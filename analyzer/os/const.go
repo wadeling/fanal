@@ -15,6 +15,9 @@ const (
 	// CentOS is done
 	CentOS = "centos"
 
+	// OpenEuler is done
+	OpenEuler = "OpenEuler"
+
 	// Rocky is done
 	Rocky = "rocky"
 

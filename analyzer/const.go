@@ -10,6 +10,7 @@ const (
 	TypeAmazon     Type = "amazon"
 	TypeDebian     Type = "debian"
 	TypePhoton     Type = "photon"
+	TypeOpenEuler  Type = "openeuler"
 	TypeCentOS     Type = "centos"
 	TypeRocky      Type = "rocky"
 	TypeAlma       Type = "alma"
