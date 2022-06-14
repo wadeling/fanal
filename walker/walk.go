@@ -1,22 +1,21 @@
 package walker
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-
-	"golang.org/x/xerrors"
 
 	"github.com/aquasecurity/fanal/analyzer"
 	"github.com/aquasecurity/fanal/utils"
 )
 
 var (
-	appDirs    = []string{".git", "vendor"}
-	systemDirs = []string{"proc", "sys", "dev"}
+	// These variables are exported so that a tool importing Trivy as a library can override these values.
+	AppDirs    = []string{".git", "vendor"}
+	SystemDirs = []string{"proc", "sys", "dev"}
 )
+
+const ThresholdSize = int64(200) << 20
 
 type WalkFunc func(filePath string, info os.FileInfo, opener analyzer.Opener) error
 
@@ -33,7 +32,7 @@ func newWalker(skipFiles, skipDirs []string) walker {
 		cleanSkipFiles = append(cleanSkipFiles, skipFile)
 	}
 
-	for _, skipDir := range append(skipDirs, systemDirs...) {
+	for _, skipDir := range append(skipDirs, SystemDirs...) {
 		skipDir = filepath.Clean(filepath.ToSlash(skipDir))
 		skipDir = strings.TrimLeft(skipDir, "/")
 		cleanSkipDirs = append(cleanSkipDirs, skipDir)
@@ -50,11 +49,7 @@ func (w *walker) shouldSkipFile(filePath string) bool {
 	filePath = strings.TrimLeft(filePath, "/")
 
 	// skip files
-	if utils.StringInSlice(filePath, w.skipFiles) {
-		return true
-	}
-
-	return false
+	return utils.StringInSlice(filePath, w.skipFiles)
 }
 
 func (w *walker) shouldSkipDir(dir string) bool {
@@ -63,7 +58,7 @@ func (w *walker) shouldSkipDir(dir string) bool {
 
 	// Skip application dirs (relative path)
 	base := filepath.Base(dir)
-	if utils.StringInSlice(base, appDirs) {
+	if utils.StringInSlice(base, AppDirs) {
 		return true
 	}
 
@@ -73,21 +68,4 @@ func (w *walker) shouldSkipDir(dir string) bool {
 	}
 
 	return false
-}
-
-// fileOnceOpener opens a file once and the content is shared so that some analyzers can use the same data
-func (w *walker) fileOnceOpener(r io.Reader) func() ([]byte, error) {
-	var once sync.Once
-	var b []byte
-	var err error
-
-	return func() ([]byte, error) {
-		once.Do(func() {
-			b, err = io.ReadAll(r)
-		})
-		if err != nil {
-			return nil, xerrors.Errorf("unable to read the file: %w", err)
-		}
-		return b, nil
-	}
 }

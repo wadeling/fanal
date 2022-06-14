@@ -1,39 +1,45 @@
 package language
 
 import (
-	"bytes"
-	"io"
-
 	"golang.org/x/xerrors"
 
 	"github.com/aquasecurity/fanal/analyzer"
 	"github.com/aquasecurity/fanal/types"
+	dio "github.com/aquasecurity/go-dep-parser/pkg/io"
 	godeptypes "github.com/aquasecurity/go-dep-parser/pkg/types"
 )
 
-type Parser func(r io.Reader) ([]godeptypes.Library, error)
-
-func Analyze(fileType, filePath string, content []byte, parse Parser) (*analyzer.AnalysisResult, error) {
-	r := bytes.NewReader(content)
-	parsedLibs, err := parse(r)
+func Analyze(fileType, filePath string, r dio.ReadSeekerAt, parser godeptypes.Parser) (*analyzer.AnalysisResult, error) {
+	parsedLibs, parsedDependencies, err := parser.Parse(r)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse %s: %w", filePath, err)
 	}
 
-	if len(parsedLibs) == 0 {
-		return nil, nil
-	}
-
-	return ToAnalysisResult(fileType, filePath, parsedLibs), nil
+	// The file path of each library should be empty in case of dependency list such as lock file
+	// since they all will be the same path.
+	return ToAnalysisResult(fileType, filePath, "", parsedLibs, parsedDependencies), nil
 }
 
-func ToAnalysisResult(fileType, filePath string, libs []godeptypes.Library) *analyzer.AnalysisResult {
+func ToAnalysisResult(fileType, filePath, libFilePath string, libs []godeptypes.Library, depGraph []godeptypes.Dependency) *analyzer.AnalysisResult {
+	if len(libs) == 0 {
+		return nil
+	}
+
+	deps := make(map[string][]string)
+	for _, dep := range depGraph {
+		deps[dep.ID] = dep.DependsOn
+	}
+
 	var pkgs []types.Package
 	for _, lib := range libs {
 		pkgs = append(pkgs, types.Package{
-			Name:    lib.Name,
-			Version: lib.Version,
-			License: lib.License,
+			ID:        lib.ID,
+			Name:      lib.Name,
+			Version:   lib.Version,
+			FilePath:  libFilePath,
+			Indirect:  lib.Indirect,
+			License:   lib.License,
+			DependsOn: deps[lib.ID],
 		})
 	}
 	apps := []types.Application{{

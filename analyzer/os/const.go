@@ -33,6 +33,9 @@ const (
 	// Oracle is done
 	Oracle = "oracle"
 
+	// Mariner is done
+	CBLMariner = "cbl-mariner"
+
 	// FreeBSD currently doesn't support docker
 	// FreeBSD = "freebsd"
 

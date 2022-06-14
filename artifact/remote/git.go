@@ -7,9 +7,9 @@ import (
 	"os"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"golang.org/x/xerrors"
 
-	"github.com/aquasecurity/fanal/analyzer/config"
 	"github.com/aquasecurity/fanal/artifact"
 	"github.com/aquasecurity/fanal/artifact/local"
 	"github.com/aquasecurity/fanal/cache"
@@ -21,7 +21,7 @@ type Artifact struct {
 	local artifact.Artifact
 }
 
-func NewArtifact(rawurl string, c cache.ArtifactCache, artifactOpt artifact.Option, scannerOpt config.ScannerOption) (
+func NewArtifact(rawurl string, c cache.ArtifactCache, artifactOpt artifact.Option) (
 	artifact.Artifact, func(), error) {
 	cleanup := func() {}
 
@@ -35,11 +35,20 @@ func NewArtifact(rawurl string, c cache.ArtifactCache, artifactOpt artifact.Opti
 		return nil, cleanup, err
 	}
 
-	_, err = git.PlainClone(tmpDir, false, &git.CloneOptions{
-		URL:      u.String(),
-		Progress: os.Stdout,
-		Depth:    1,
-	})
+	cloneOptions := git.CloneOptions{
+		URL:             u.String(),
+		Auth:            gitAuth(),
+		Progress:        os.Stdout,
+		Depth:           1,
+		InsecureSkipTLS: artifactOpt.InsecureSkipTLS,
+	}
+
+	// suppress clone output if noProgress
+	if artifactOpt.NoProgress {
+		cloneOptions.Progress = nil
+	}
+
+	_, err = git.PlainClone(tmpDir, false, &cloneOptions)
 	if err != nil {
 		return nil, cleanup, xerrors.Errorf("git error: %w", err)
 	}
@@ -48,7 +57,7 @@ func NewArtifact(rawurl string, c cache.ArtifactCache, artifactOpt artifact.Opti
 		_ = os.RemoveAll(tmpDir)
 	}
 
-	art, err := local.NewArtifact(tmpDir, c, artifactOpt, scannerOpt)
+	art, err := local.NewArtifact(tmpDir, c, artifactOpt)
 	if err != nil {
 		return nil, cleanup, xerrors.Errorf("fs artifact: %w", err)
 	}
@@ -71,6 +80,10 @@ func (a Artifact) Inspect(ctx context.Context) (types.ArtifactReference, error) 
 	return ref, nil
 }
 
+func (Artifact) Clean(_ types.ArtifactReference) error {
+	return nil
+}
+
 func newURL(rawurl string) (*url.URL, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
@@ -83,4 +96,39 @@ func newURL(rawurl string) (*url.URL, error) {
 	}
 
 	return u, nil
+}
+
+// Helper function to check for a GitHub/GitLab token from env vars in order to
+// make authenticated requests to access private repos
+func gitAuth() *http.BasicAuth {
+
+	var auth *http.BasicAuth
+
+	// The username can be anything for HTTPS Git operations
+	gitUsername := "fanal-aquasecurity-scan"
+
+	// We first check if a GitHub token was provided
+	githubToken := os.Getenv("GITHUB_TOKEN")
+	if githubToken != "" {
+		auth = &http.BasicAuth{
+			Username: gitUsername,
+			Password: githubToken,
+		}
+		return auth
+	}
+
+	// Otherwise we check if a GitLab token was provided
+	gitlabToken := os.Getenv("GITLAB_TOKEN")
+	if gitlabToken != "" {
+		auth = &http.BasicAuth{
+			Username: gitUsername,
+			Password: gitlabToken,
+		}
+		return auth
+	}
+
+	// If no token was provided, we simply return a nil,
+	// which will make the request to be unauthenticated
+	return nil
+
 }

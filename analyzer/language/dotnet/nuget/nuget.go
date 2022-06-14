@@ -5,12 +5,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/exp/slices"
+
 	"golang.org/x/xerrors"
 
 	"github.com/aquasecurity/fanal/analyzer"
 	"github.com/aquasecurity/fanal/analyzer/language"
 	"github.com/aquasecurity/fanal/types"
-	"github.com/aquasecurity/fanal/utils"
 	"github.com/aquasecurity/go-dep-parser/pkg/nuget/config"
 	"github.com/aquasecurity/go-dep-parser/pkg/nuget/lock"
 )
@@ -21,24 +22,24 @@ func init() {
 
 const (
 	version    = 2
-	lockFile   = "packages.lock.json"
-	configFile = "packages.config"
+	lockFile   = types.NuGetPkgsLock
+	configFile = types.NuGetPkgsConfig
 )
 
 var requiredFiles = []string{lockFile, configFile}
 
 type nugetLibraryAnalyzer struct{}
 
-func (a nugetLibraryAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
+func (a nugetLibraryAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
 	// Set the default parser
-	parser := lock.Parse
+	parser := lock.NewParser()
 
-	targetFile := filepath.Base(target.FilePath)
+	targetFile := filepath.Base(input.FilePath)
 	if targetFile == configFile {
-		parser = config.Parse
+		parser = config.NewParser()
 	}
 
-	res, err := language.Analyze(types.NuGet, target.FilePath, target.Content, parser)
+	res, err := language.Analyze(types.NuGet, input.FilePath, input.Content, parser)
 	if err != nil {
 		return nil, xerrors.Errorf("NuGet analysis error: %w", err)
 	}
@@ -47,7 +48,7 @@ func (a nugetLibraryAnalyzer) Analyze(_ context.Context, target analyzer.Analysi
 
 func (a nugetLibraryAnalyzer) Required(filePath string, _ os.FileInfo) bool {
 	fileName := filepath.Base(filePath)
-	return utils.StringInSlice(fileName, requiredFiles)
+	return slices.Contains(requiredFiles, fileName)
 }
 
 func (a nugetLibraryAnalyzer) Type() analyzer.Type {

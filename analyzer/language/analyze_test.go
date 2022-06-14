@@ -2,6 +2,7 @@ package language_test
 
 import (
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,14 +12,33 @@ import (
 	"github.com/aquasecurity/fanal/analyzer"
 	"github.com/aquasecurity/fanal/analyzer/language"
 	"github.com/aquasecurity/fanal/types"
+	dio "github.com/aquasecurity/go-dep-parser/pkg/io"
 	godeptypes "github.com/aquasecurity/go-dep-parser/pkg/types"
 )
+
+type mockParser struct {
+	t *testing.T
+}
+
+func (p *mockParser) Parse(r dio.ReadSeekerAt) ([]godeptypes.Library, []godeptypes.Dependency, error) {
+	b, err := io.ReadAll(r)
+	require.NoError(p.t, err)
+
+	switch string(b) {
+	case "happy":
+		return []godeptypes.Library{{Name: "test", Version: "1.2.3"}}, nil, nil
+	case "sad":
+		return nil, nil, xerrors.New("unexpected error")
+	}
+
+	return nil, nil, nil
+}
 
 func TestAnalyze(t *testing.T) {
 	type args struct {
 		analyzerType string
 		filePath     string
-		content      []byte
+		content      dio.ReadSeekerAt
 	}
 	tests := []struct {
 		name    string
@@ -31,7 +51,7 @@ func TestAnalyze(t *testing.T) {
 			args: args{
 				analyzerType: types.GoBinary,
 				filePath:     "app/myweb",
-				content:      []byte("happy"),
+				content:      strings.NewReader("happy"),
 			},
 			want: &analyzer.AnalysisResult{
 				Applications: []types.Application{
@@ -53,7 +73,7 @@ func TestAnalyze(t *testing.T) {
 			args: args{
 				analyzerType: types.GoBinary,
 				filePath:     "app/myweb",
-				content:      []byte(""),
+				content:      strings.NewReader(""),
 			},
 			want: nil,
 		},
@@ -62,28 +82,16 @@ func TestAnalyze(t *testing.T) {
 			args: args{
 				analyzerType: types.Jar,
 				filePath:     "app/myweb",
-				content:      []byte("sad"),
+				content:      strings.NewReader("sad"),
 			},
 			wantErr: "unexpected error",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parse := func(r io.Reader) ([]godeptypes.Library, error) {
-				b, err := io.ReadAll(r)
-				require.NoError(t, err)
+			mp := &mockParser{t: t}
 
-				switch string(b) {
-				case "happy":
-					return []godeptypes.Library{{Name: "test", Version: "1.2.3"}}, nil
-				case "sad":
-					return nil, xerrors.New("unexpected error")
-				}
-
-				return nil, nil
-			}
-
-			got, err := language.Analyze(tt.args.analyzerType, tt.args.filePath, tt.args.content, parse)
+			got, err := language.Analyze(tt.args.analyzerType, tt.args.filePath, tt.args.content, mp)
 			if tt.wantErr != "" {
 				require.NotNil(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)

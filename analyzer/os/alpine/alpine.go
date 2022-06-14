@@ -2,16 +2,16 @@ package alpine
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"os"
+
+	"golang.org/x/exp/slices"
 
 	"golang.org/x/xerrors"
 
 	"github.com/aquasecurity/fanal/analyzer"
 	aos "github.com/aquasecurity/fanal/analyzer/os"
 	"github.com/aquasecurity/fanal/types"
-	"github.com/aquasecurity/fanal/utils"
 )
 
 func init() {
@@ -24,8 +24,8 @@ var requiredFiles = []string{"etc/alpine-release"}
 
 type alpineOSAnalyzer struct{}
 
-func (a alpineOSAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	scanner := bufio.NewScanner(bytes.NewBuffer(target.Content))
+func (a alpineOSAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	scanner := bufio.NewScanner(input.Content)
 	for scanner.Scan() {
 		line := scanner.Text()
 		return &analyzer.AnalysisResult{
@@ -36,7 +36,7 @@ func (a alpineOSAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTar
 }
 
 func (a alpineOSAnalyzer) Required(filePath string, _ os.FileInfo) bool {
-	return utils.StringInSlice(filePath, requiredFiles)
+	return slices.Contains(requiredFiles, filePath)
 }
 
 func (a alpineOSAnalyzer) Type() analyzer.Type {

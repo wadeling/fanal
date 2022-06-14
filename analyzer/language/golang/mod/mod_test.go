@@ -3,11 +3,11 @@ package mod
 import (
 	"context"
 	"os"
-	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 
 	"github.com/aquasecurity/fanal/analyzer"
 	"github.com/aquasecurity/fanal/types"
@@ -16,18 +16,43 @@ import (
 func Test_gomodAnalyzer_Analyze(t *testing.T) {
 	tests := []struct {
 		name      string
+		filePath  string
 		inputFile string
 		want      *analyzer.AnalysisResult
 		wantErr   string
 	}{
 		{
-			name:      "happy path",
-			inputFile: "testdata/gomod_many.sum",
+			name:      "go.mod",
+			filePath:  "testdata/go.mod",
+			inputFile: "testdata/normal_go.mod",
 			want: &analyzer.AnalysisResult{
 				Applications: []types.Application{
 					{
-						Type:     types.GoMod,
-						FilePath: "testdata/gomod_many.sum",
+						Type:     types.GoModule,
+						FilePath: "testdata/go.mod",
+						Libraries: []types.Package{
+							{
+								Name:    "github.com/aquasecurity/go-dep-parser",
+								Version: "0.0.0-20220406074731-71021a481237",
+							},
+							{
+								Name: "golang.org/x/xerrors", Version: "0.0.0-20200804184101-5ec99f83aff1",
+								Indirect: true,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:      "go.sum",
+			filePath:  "testdata/go.sum",
+			inputFile: "testdata/normal_go.sum",
+			want: &analyzer.AnalysisResult{
+				Applications: []types.Application{
+					{
+						Type:     types.GoModule,
+						FilePath: "testdata/go.sum",
 						Libraries: []types.Package{
 							{Name: "github.com/BurntSushi/toml", Version: "0.3.1"},
 							{Name: "github.com/cpuguy83/go-md2man/v2", Version: "2.0.0-20190314233015-f79a8a8ca69d"},
@@ -46,22 +71,31 @@ func Test_gomodAnalyzer_Analyze(t *testing.T) {
 					},
 				},
 			},
-		}, {
-			name:      "sad path",
-			inputFile: "testdata/invalid.txt",
+		},
+		{
+			name:      "sad go.mod",
+			filePath:  "testdata/go.mod",
+			inputFile: "testdata/sad_go.mod",
+			wantErr:   "unknown directive",
+		},
+		{
+			name:      "sad go.sum",
+			filePath:  "testdata/go.sum",
+			inputFile: "testdata/sad_go.sum",
 			want:      nil,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := os.ReadFile(tt.inputFile)
+			f, err := os.Open(tt.inputFile)
 			require.NoError(t, err)
+			defer f.Close()
 
 			a := gomodAnalyzer{}
 			ctx := context.Background()
-			got, err := a.Analyze(ctx, analyzer.AnalysisTarget{
-				FilePath: tt.inputFile,
-				Content:  b,
+			got, err := a.Analyze(ctx, analyzer.AnalysisInput{
+				FilePath: tt.filePath,
+				Content:  f,
 			})
 
 			if tt.wantErr != "" {
@@ -70,11 +104,11 @@ func Test_gomodAnalyzer_Analyze(t *testing.T) {
 				return
 			}
 			if got != nil {
-				sort.Slice(got.Applications[0].Libraries, func(i, j int) bool {
-					return got.Applications[0].Libraries[i].Name < got.Applications[0].Libraries[j].Name
+				slices.SortFunc(got.Applications[0].Libraries, func(a, b types.Package) bool {
+					return a.Name < b.Name
 				})
-				sort.Slice(tt.want.Applications[0].Libraries, func(i, j int) bool {
-					return tt.want.Applications[0].Libraries[i].Name < tt.want.Applications[0].Libraries[j].Name
+				slices.SortFunc(tt.want.Applications[0].Libraries, func(a, b types.Package) bool {
+					return a.Name < b.Name
 				})
 			}
 			assert.NoError(t, err)
@@ -90,8 +124,13 @@ func Test_gomodAnalyzer_Required(t *testing.T) {
 		want     bool
 	}{
 		{
-			name:     "happy",
-			filePath: "test/go.sum",
+			name:     "go.mod",
+			filePath: "test/go.mod",
+			want:     true,
+		},
+		{
+			name:     "go.sum",
+			filePath: "test/foo/go.sum",
 			want:     true,
 		},
 		{

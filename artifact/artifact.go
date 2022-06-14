@@ -5,15 +5,23 @@ import (
 	"sort"
 
 	"github.com/aquasecurity/fanal/analyzer"
-	"github.com/aquasecurity/fanal/hook"
+	misconf "github.com/aquasecurity/fanal/analyzer/config"
+	"github.com/aquasecurity/fanal/analyzer/secret"
 	"github.com/aquasecurity/fanal/types"
 )
 
 type Option struct {
+	AnalyzerGroup     analyzer.Group // It is empty in OSS
 	DisabledAnalyzers []analyzer.Type
-	DisabledHooks     []hook.Type
+	DisabledHandlers  []types.HandlerType
 	SkipFiles         []string
 	SkipDirs          []string
+	NoProgress        bool
+	Offline           bool
+	InsecureSkipTLS   bool
+
+	MisconfScannerOption misconf.ScannerOption
+	SecretScannerOption  secret.ScannerOption
 }
 
 func (o *Option) Sort() {
@@ -26,4 +34,5 @@ func (o *Option) Sort() {
 
 type Artifact interface {
 	Inspect(ctx context.Context) (reference types.ArtifactReference, err error)
+	Clean(reference types.ArtifactReference) error
 }

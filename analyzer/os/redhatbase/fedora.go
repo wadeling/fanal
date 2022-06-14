@@ -2,7 +2,6 @@ package redhatbase
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -23,13 +22,13 @@ func init() {
 
 type fedoraOSAnalyzer struct{}
 
-func (a fedoraOSAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	scanner := bufio.NewScanner(bytes.NewBuffer(target.Content))
+func (a fedoraOSAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	scanner := bufio.NewScanner(input.Content)
 	for scanner.Scan() {
 		line := scanner.Text()
 		result := redhatRe.FindStringSubmatch(strings.TrimSpace(line))
 		if len(result) != 3 {
-			return nil, xerrors.New("cent: Invalid fedora-release")
+			return nil, xerrors.New("fedora: Invalid fedora-release")
 		}
 
 		switch strings.ToLower(result[1]) {

@@ -20,12 +20,13 @@ func init() {
 
 const version = 1
 
-var requiredFiles = []string{"package-lock.json"}
+var requiredFiles = []string{types.NpmPkgLock}
 
 type npmLibraryAnalyzer struct{}
 
-func (a npmLibraryAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	res, err := language.Analyze(types.Npm, target.FilePath, target.Content, npm.Parse)
+func (a npmLibraryAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	p := npm.NewParser()
+	res, err := language.Analyze(types.Npm, input.FilePath, input.Content, p)
 	if err != nil {
 		return nil, xerrors.Errorf("unable to parse package-lock.json: %w", err)
 	}

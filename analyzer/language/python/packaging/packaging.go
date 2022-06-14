@@ -12,7 +12,9 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/aquasecurity/fanal/analyzer"
+	"github.com/aquasecurity/fanal/analyzer/language"
 	"github.com/aquasecurity/fanal/types"
+	dio "github.com/aquasecurity/go-dep-parser/pkg/io"
 	"github.com/aquasecurity/go-dep-parser/pkg/python/packaging"
 )
 
@@ -42,42 +44,35 @@ var (
 type packagingAnalyzer struct{}
 
 // Analyze analyzes egg and wheel files.
-func (a packagingAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	content := target.Content
+func (a packagingAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	r := input.Content
 
 	// .egg file is zip format and PKG-INFO needs to be extracted from the zip file.
-	if strings.HasSuffix(target.FilePath, ".egg") {
-		pkginfoInZip, err := a.analyzeEggZip(content)
+	if strings.HasSuffix(input.FilePath, ".egg") {
+		pkginfoInZip, err := a.analyzeEggZip(input.Content, input.Info.Size())
 		if err != nil {
 			return nil, xerrors.Errorf("egg analysis error: %w", err)
 		}
-		content = pkginfoInZip
+
+		// Egg archive may not contain required files, then we will get nil. Skip this archives
+		if pkginfoInZip == nil {
+			return nil, nil
+		}
+
+		r = pkginfoInZip
 	}
 
-	r := bytes.NewReader(content)
-	lib, err := packaging.Parse(r)
+	p := packaging.NewParser()
+	libs, deps, err := p.Parse(r)
 	if err != nil {
-		return nil, xerrors.Errorf("unable to parse %s: %w", target.FilePath, err)
+		return nil, xerrors.Errorf("unable to parse %s: %w", input.FilePath, err)
 	}
 
-	return &analyzer.AnalysisResult{Applications: []types.Application{
-		{
-			Type:     types.PythonPkg,
-			FilePath: target.FilePath,
-			Libraries: []types.Package{
-				{
-					Name:     lib.Name,
-					Version:  lib.Version,
-					License:  lib.License,
-					FilePath: target.FilePath,
-				},
-			},
-		},
-	}}, nil
+	return language.ToAnalysisResult(types.PythonPkg, input.FilePath, input.FilePath, libs, deps), nil
 }
 
-func (a packagingAnalyzer) analyzeEggZip(content []byte) ([]byte, error) {
-	zr, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+func (a packagingAnalyzer) analyzeEggZip(r io.ReaderAt, size int64) (dio.ReadSeekerAt, error) {
+	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return nil, xerrors.Errorf("zip reader error: %w", err)
 	}
@@ -93,7 +88,7 @@ func (a packagingAnalyzer) analyzeEggZip(content []byte) ([]byte, error) {
 	return nil, nil
 }
 
-func (a packagingAnalyzer) open(file *zip.File) ([]byte, error) {
+func (a packagingAnalyzer) open(file *zip.File) (dio.ReadSeekerAt, error) {
 	f, err := file.Open()
 	if err != nil {
 		return nil, err
@@ -102,9 +97,10 @@ func (a packagingAnalyzer) open(file *zip.File) ([]byte, error) {
 
 	b, err := io.ReadAll(f)
 	if err != nil {
-		return nil, xerrors.Errorf("file read error: %w", err)
+		return nil, xerrors.Errorf("file %s open error: %w", file.Name, err)
 	}
-	return b, nil
+
+	return bytes.NewReader(b), nil
 }
 
 func (a packagingAnalyzer) Required(filePath string, _ os.FileInfo) bool {

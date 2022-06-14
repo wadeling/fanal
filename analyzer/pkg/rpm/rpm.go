@@ -2,7 +2,7 @@ package rpm
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,18 +20,45 @@ func init() {
 	analyzer.RegisterAnalyzer(&rpmPkgAnalyzer{})
 }
 
-const version = 1
+const version = 2
 
-var requiredFiles = []string{
-	"usr/lib/sysimage/rpm/Packages",
-	"var/lib/rpm/Packages",
+var (
+	requiredFiles = []string{
+		// Berkeley DB
+		"usr/lib/sysimage/rpm/Packages",
+		"var/lib/rpm/Packages",
+
+		// NDB
+		"usr/lib/sysimage/rpm/Packages.db",
+		"var/lib/rpm/Packages.db",
+
+		// SQLite3
+		"usr/lib/sysimage/rpm/rpmdb.sqlite",
+		"var/lib/rpm/rpmdb.sqlite",
+	}
+
+	errUnexpectedNameFormat = xerrors.New("unexpected name format")
+)
+
+var osVendors = []string{
+	"Amazon Linux",          // Amazon Linux 1
+	"Amazon.com",            // Amazon Linux 2
+	"CentOS",                // CentOS
+	"Fedora Project",        // Fedora
+	"Oracle America",        // Oracle Linux
+	"Red Hat",               // Red Hat
+	"AlmaLinux",             // AlmaLinux
+	"CloudLinux",            // AlmaLinux
+	"VMware",                // Photon OS
+	"SUSE",                  // SUSE Linux Enterprise
+	"openSUSE",              // openSUSE
+	"Microsoft Corporation", // CBL-Mariner
 }
-var errUnexpectedNameFormat = xerrors.New("unexpected name format")
 
 type rpmPkgAnalyzer struct{}
 
-func (a rpmPkgAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	parsedPkgs, installedFiles, err := a.parsePkgInfo(target.Content)
+func (a rpmPkgAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	parsedPkgs, installedFiles, err := a.parsePkgInfo(input.Content)
 	if err != nil {
 		return nil, xerrors.Errorf("failed to parse rpmdb: %w", err)
 	}
@@ -39,7 +66,7 @@ func (a rpmPkgAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarge
 	return &analyzer.AnalysisResult{
 		PackageInfos: []types.PackageInfo{
 			{
-				FilePath: target.FilePath,
+				FilePath: input.FilePath,
 				Packages: parsedPkgs,
 			},
 		},
@@ -47,17 +74,26 @@ func (a rpmPkgAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarge
 	}, nil
 }
 
-func (a rpmPkgAnalyzer) parsePkgInfo(packageBytes []byte) ([]types.Package, []string, error) {
-	tmpDir, err := ioutil.TempDir("", "rpm")
-	defer os.RemoveAll(tmpDir)
+func (a rpmPkgAnalyzer) parsePkgInfo(rc io.Reader) ([]types.Package, []string, error) {
+	tmpDir, err := os.MkdirTemp("", "rpm")
 	if err != nil {
 		return nil, nil, xerrors.Errorf("failed to create a temp dir: %w", err)
 	}
+	defer os.RemoveAll(tmpDir)
 
 	filename := filepath.Join(tmpDir, "Packages")
-	err = ioutil.WriteFile(filename, packageBytes, 0700)
+	f, err := os.Create(filename)
 	if err != nil {
-		return nil, nil, xerrors.Errorf("failed to write a package file: %w", err)
+		return nil, nil, xerrors.Errorf("failed to create a package file: %w", err)
+	}
+
+	if _, err = io.Copy(f, rc); err != nil {
+		return nil, nil, xerrors.Errorf("failed to copy a package file: %w", err)
+	}
+
+	// The temp file must be closed before being opened as Berkeley DB.
+	if err = f.Close(); err != nil {
+		return nil, nil, xerrors.Errorf("failed to close a temp file: %w", err)
 	}
 
 	// rpm-python 4.11.3 rpm-4.11.3-35.el7.src.rpm
@@ -72,7 +108,7 @@ func (a rpmPkgAnalyzer) parsePkgInfo(packageBytes []byte) ([]types.Package, []st
 	//   old version: rpm -qa --qf "%{NAME} %{EPOCH} %{VERSION} %{RELEASE} %{SOURCERPM} %{ARCH}\n"
 	pkgList, err := db.ListPackages()
 	if err != nil {
-		return nil, nil, xerrors.Errorf("failed to list packages", err)
+		return nil, nil, xerrors.Errorf("failed to list packages: %w", err)
 	}
 
 	var pkgs []types.Package
@@ -93,19 +129,24 @@ func (a rpmPkgAnalyzer) parsePkgInfo(packageBytes []byte) ([]types.Package, []st
 			}
 		}
 
-		files, err := pkg.InstalledFiles()
-		if err != nil {
-			return nil, nil, xerrors.Errorf("unable to get installed files: %w", err)
+		// Check if the package is vendor-provided.
+		// If the package is not provided by vendor, the installed files should not be skipped.
+		var files []string
+		if packageProvidedByVendor(pkg.Vendor) {
+			files, err = pkg.InstalledFileNames()
+			if err != nil {
+				return nil, nil, xerrors.Errorf("unable to get installed files: %w", err)
+			}
 		}
 
 		p := types.Package{
 			Name:            pkg.Name,
-			Epoch:           pkg.Epoch,
+			Epoch:           pkg.EpochNum(),
 			Version:         pkg.Version,
 			Release:         pkg.Release,
 			Arch:            arch,
 			SrcName:         srcName,
-			SrcEpoch:        pkg.Epoch, // NOTE: use epoch of binary package as epoch of src package
+			SrcEpoch:        pkg.EpochNum(), // NOTE: use epoch of binary package as epoch of src package
 			SrcVersion:      srcVer,
 			SrcRelease:      srcRel,
 			Modularitylabel: pkg.Modularitylabel,
@@ -159,4 +200,13 @@ func (a rpmPkgAnalyzer) Type() analyzer.Type {
 
 func (a rpmPkgAnalyzer) Version() int {
 	return version
+}
+
+func packageProvidedByVendor(pkgVendor string) bool {
+	for _, vendor := range osVendors {
+		if strings.HasPrefix(pkgVendor, vendor) {
+			return true
+		}
+	}
+	return false
 }

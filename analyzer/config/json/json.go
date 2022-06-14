@@ -2,7 +2,7 @@ package json
 
 import (
 	"context"
-	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,7 +17,7 @@ const version = 1
 
 var (
 	requiredExt   = ".json"
-	excludedFiles = []string{"package-lock.json", "packages.lock.json"}
+	excludedFiles = []string{types.NpmPkgLock, types.NuGetPkgsLock, types.NuGetPkgsConfig}
 )
 
 type ConfigAnalyzer struct {
@@ -30,18 +30,21 @@ func NewConfigAnalyzer(filePattern *regexp.Regexp) ConfigAnalyzer {
 	}
 }
 
-func (a ConfigAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	var parsed interface{}
-	if err := json.Unmarshal(target.Content, &parsed); err != nil {
-		return nil, xerrors.Errorf("unable to parse JSON (%s): %w", target.FilePath, err)
+func (a ConfigAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	b, err := io.ReadAll(input.Content)
+	if err != nil {
+		return nil, xerrors.Errorf("failed to read %s: %w", input.FilePath, err)
 	}
 
 	return &analyzer.AnalysisResult{
-		Configs: []types.Config{
-			{
-				Type:     types.JSON,
-				FilePath: target.FilePath,
-				Content:  parsed,
+		Files: map[types.HandlerType][]types.File{
+			// It will be passed to misconfig post handler
+			types.MisconfPostHandler: {
+				{
+					Type:    types.JSON,
+					Path:    input.FilePath,
+					Content: b,
+				},
 			},
 		},
 	}, nil

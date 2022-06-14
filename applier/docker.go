@@ -1,6 +1,8 @@
 package applier
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aquasecurity/fanal/types"
@@ -30,15 +32,40 @@ func containsPackage(e types.Package, s []types.Package) bool {
 	return false
 }
 
-func lookupOriginLayerForPkg(pkg types.Package, layers []types.BlobInfo) (string, string) {
-	for _, layer := range layers {
+func lookupOriginLayerForPkg(pkg types.Package, layers []types.BlobInfo) (string, string, *types.BuildInfo) {
+	for i, layer := range layers {
 		for _, info := range layer.PackageInfos {
 			if containsPackage(pkg, info.Packages) {
-				return layer.Digest, layer.DiffID
+				return layer.Digest, layer.DiffID, lookupBuildInfo(i, layers)
 			}
 		}
 	}
-	return "", ""
+	return "", "", nil
+}
+
+// lookupBuildInfo looks up Red Hat content sets from all layers
+func lookupBuildInfo(index int, layers []types.BlobInfo) *types.BuildInfo {
+	if layers[index].BuildInfo != nil {
+		return layers[index].BuildInfo
+	}
+
+	// Base layer (layers[0]) is missing content sets
+	//   - it needs to be shared from layers[1]
+	if index == 0 {
+		if len(layers) > 1 {
+			return layers[1].BuildInfo
+		}
+		return nil
+	}
+
+	// Customer's layers build on top of Red Hat image are also missing content sets
+	//   - it needs to be shared from the last Red Hat's layers which contains content sets
+	for i := index - 1; i >= 1; i-- {
+		if layers[i].BuildInfo != nil {
+			return layers[i].BuildInfo
+		}
+	}
+	return nil
 }
 
 func lookupOriginLayerForLib(filePath string, lib types.Package, layers []types.BlobInfo) (string, string) {
@@ -62,6 +89,7 @@ func ApplyLayers(layers []types.BlobInfo) types.ArtifactDetail {
 
 	for _, layer := range layers {
 		for _, opqDir := range layer.OpaqueDirs {
+			opqDir = strings.TrimSuffix(opqDir, sep) //this is necessary so that an empty element is not contribute into the array of the DeleteByString function
 			_ = nestedMap.DeleteByString(opqDir, sep)
 		}
 		for _, whFile := range layer.WhiteoutFiles {
@@ -72,18 +100,41 @@ func ApplyLayers(layers []types.BlobInfo) types.ArtifactDetail {
 			mergedLayer.OS = layer.OS
 		}
 
+		if layer.Repository != nil {
+			mergedLayer.Repository = layer.Repository
+		}
+
 		for _, pkgInfo := range layer.PackageInfos {
-			nestedMap.SetByString(pkgInfo.FilePath, sep, pkgInfo)
+			key := fmt.Sprintf("%s/type:ospkg", pkgInfo.FilePath)
+			nestedMap.SetByString(key, sep, pkgInfo)
 		}
 		for _, app := range layer.Applications {
-			nestedMap.SetByString(app.FilePath, sep, app)
+			key := fmt.Sprintf("%s/type:%s", app.FilePath, app.Type)
+			nestedMap.SetByString(key, sep, app)
 		}
 		for _, config := range layer.Misconfigurations {
 			config.Layer = types.Layer{
 				Digest: layer.Digest,
 				DiffID: layer.DiffID,
 			}
-			nestedMap.SetByString(config.FilePath, sep, config)
+			key := fmt.Sprintf("%s/type:config", config.FilePath)
+			nestedMap.SetByString(key, sep, config)
+		}
+		for _, secret := range layer.Secrets {
+			secret.Layer = types.Layer{
+				Digest: layer.Digest,
+				DiffID: layer.DiffID,
+			}
+			key := fmt.Sprintf("%s/type:secret", secret.FilePath)
+			nestedMap.SetByString(key, sep, secret)
+		}
+		for _, customResource := range layer.CustomResources {
+			key := fmt.Sprintf("%s/custom:%s", customResource.FilePath, customResource.Type)
+			customResource.Layer = types.Layer{
+				Digest: layer.Digest,
+				DiffID: layer.DiffID,
+			}
+			nestedMap.SetByString(key, sep, customResource)
 		}
 	}
 
@@ -95,16 +146,21 @@ func ApplyLayers(layers []types.BlobInfo) types.ArtifactDetail {
 			mergedLayer.Applications = append(mergedLayer.Applications, v)
 		case types.Misconfiguration:
 			mergedLayer.Misconfigurations = append(mergedLayer.Misconfigurations, v)
+		case types.Secret:
+			mergedLayer.Secrets = append(mergedLayer.Secrets, v)
+		case types.CustomResource:
+			mergedLayer.CustomResources = append(mergedLayer.CustomResources, v)
 		}
 		return nil
 	})
 
 	for i, pkg := range mergedLayer.Packages {
-		originLayerDigest, originLayerDiffID := lookupOriginLayerForPkg(pkg, layers)
+		originLayerDigest, originLayerDiffID, buildInfo := lookupOriginLayerForPkg(pkg, layers)
 		mergedLayer.Packages[i].Layer = types.Layer{
 			Digest: originLayerDigest,
 			DiffID: originLayerDiffID,
 		}
+		mergedLayer.Packages[i].BuildInfo = buildInfo
 	}
 
 	for _, app := range mergedLayer.Applications {

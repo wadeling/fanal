@@ -20,12 +20,37 @@ type MisconfResult struct {
 	Query          string `json:",omitempty"`
 	Message        string `json:",omitempty"`
 	PolicyMetadata `json:",omitempty"`
+	CauseMetadata  `json:",omitempty"`
 
 	// For debugging
 	Traces []string `json:",omitempty"`
 }
 
 type MisconfResults []MisconfResult
+
+type CauseMetadata struct {
+	Resource  string `json:",omitempty"`
+	Provider  string `json:",omitempty"`
+	Service   string `json:",omitempty"`
+	StartLine int    `json:",omitempty"`
+	EndLine   int    `json:",omitempty"`
+	Code      Code   `json:",omitempty"`
+}
+
+type Code struct {
+	Lines []Line
+}
+
+type Line struct {
+	Number      int    `json:"Number"`
+	Content     string `json:"Content"`
+	IsCause     bool   `json:"IsCause"`
+	Annotation  string `json:"Annotation"`
+	Truncated   bool   `json:"Truncated"`
+	Highlighted string `json:"Highlighted,omitempty"`
+	FirstCause  bool   `json:"FirstCause"`
+	LastCause   bool   `json:"LastCause"`
+}
 
 type PolicyMetadata struct {
 	ID                 string   `json:",omitempty"`

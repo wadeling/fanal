@@ -1,17 +1,16 @@
 package gemspec
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"regexp"
 
-	"golang.org/x/xerrors"
-
 	"github.com/aquasecurity/fanal/analyzer"
+	"github.com/aquasecurity/fanal/analyzer/language"
 	"github.com/aquasecurity/fanal/types"
 	"github.com/aquasecurity/go-dep-parser/pkg/ruby/gemspec"
+	"golang.org/x/xerrors"
 )
 
 func init() {
@@ -24,30 +23,14 @@ var fileRegex = regexp.MustCompile(`.*/specifications/.+\.gemspec`)
 
 type gemspecLibraryAnalyzer struct{}
 
-func (a gemspecLibraryAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	r := bytes.NewReader(target.Content)
-	parsedLib, err := gemspec.Parse(r)
+func (a gemspecLibraryAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	p := gemspec.NewParser()
+	libs, deps, err := p.Parse(input.Content)
 	if err != nil {
-		return nil, xerrors.Errorf("failed to parse %s: %w", target.FilePath, err)
+		return nil, xerrors.Errorf("%s parse error: %w", input.FilePath, err)
 	}
 
-	return &analyzer.AnalysisResult{
-		Applications: []types.Application{
-			{
-				Type:     types.GemSpec,
-				FilePath: target.FilePath,
-				Libraries: []types.Package{
-					{
-						Name:     parsedLib.Name,
-						Version:  parsedLib.Version,
-						License:  parsedLib.License,
-						FilePath: target.FilePath,
-					},
-				},
-			},
-		},
-	}, nil
-
+	return language.ToAnalysisResult(types.GemSpec, input.FilePath, input.FilePath, libs, deps), nil
 }
 
 func (a gemspecLibraryAnalyzer) Required(filePath string, _ os.FileInfo) bool {

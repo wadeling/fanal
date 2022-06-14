@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
@@ -21,7 +20,6 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	_ "github.com/aquasecurity/fanal/analyzer/all"
-	"github.com/aquasecurity/fanal/analyzer/config"
 	"github.com/aquasecurity/fanal/applier"
 	"github.com/aquasecurity/fanal/artifact"
 	aimage "github.com/aquasecurity/fanal/artifact/image"
@@ -56,10 +54,10 @@ func TestTLSRegistry(t *testing.T) {
 			"REGISTRY_AUTH_HTPASSWD_PATH":   "/auth/htpasswd",
 			"REGISTRY_AUTH_HTPASSWD_REALM":  "Registry Realm",
 		},
-		BindMounts: map[string]string{
-			filepath.Join(baseDir, "data", "registry", "certs"): "/certs",
-			filepath.Join(baseDir, "data", "registry", "auth"):  "/auth",
-		},
+		Mounts: testcontainers.Mounts(
+			testcontainers.BindMount(filepath.Join(baseDir, "data", "registry", "certs"), "/certs"),
+			testcontainers.BindMount(filepath.Join(baseDir, "data", "registry", "auth"), "/auth"),
+		),
 		WaitingFor: wait.ForLog("listening on [::]:5443"),
 	}
 
@@ -80,45 +78,45 @@ func TestTLSRegistry(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name       string
-		imageName  string
-		imageFile  string
-		option     types.DockerOption
-		login      bool
-		expectedOS types.OS
-		wantErr    bool
+		name         string
+		imageName    string
+		imageFile    string
+		option       types.DockerOption
+		login        bool
+		expectedOS   types.OS
+		expectedRepo types.Repository
+		wantErr      bool
 	}{
 		{
 			name:      "happy path",
-			imageName: "alpine:3.10",
+			imageName: "ghcr.io/aquasecurity/trivy-test-images:alpine-310",
 			imageFile: "testdata/fixtures/alpine-310.tar.gz",
 			option: types.DockerOption{
-				Timeout:               60 * time.Second,
 				UserName:              registryUsername,
 				Password:              registryPassword,
 				InsecureSkipTLSVerify: true,
 			},
-			expectedOS: types.OS{Name: "3.10.2", Family: "alpine"},
-			wantErr:    false,
+			expectedOS:   types.OS{Name: "3.10.2", Family: "alpine"},
+			expectedRepo: types.Repository{Family: "alpine", Release: "3.10"},
+			wantErr:      false,
 		},
 		{
 			name:      "happy path with docker login",
-			imageName: "alpine:3.10",
+			imageName: "ghcr.io/aquasecurity/trivy-test-images:alpine-310",
 			imageFile: "testdata/fixtures/alpine-310.tar.gz",
 			option: types.DockerOption{
-				Timeout:               60 * time.Second,
 				InsecureSkipTLSVerify: true,
 			},
-			login:      true,
-			expectedOS: types.OS{Name: "3.10.2", Family: "alpine"},
-			wantErr:    false,
+			login:        true,
+			expectedOS:   types.OS{Name: "3.10.2", Family: "alpine"},
+			expectedRepo: types.Repository{Family: "alpine", Release: "3.10"},
+			wantErr:      false,
 		},
 		{
 			name:      "sad path: tls verify",
-			imageName: "alpine:3.10",
+			imageName: "ghcr.io/aquasecurity/trivy-test-images:alpine-310",
 			imageFile: "testdata/fixtures/alpine-310.tar.gz",
 			option: types.DockerOption{
-				Timeout:  60 * time.Second,
 				UserName: registryUsername,
 				Password: registryPassword,
 			},
@@ -126,10 +124,9 @@ func TestTLSRegistry(t *testing.T) {
 		},
 		{
 			name:      "sad path: no credential",
-			imageName: "alpine:3.10",
+			imageName: "ghcr.io/aquasecurity/trivy-test-images:alpine-310",
 			imageFile: "testdata/fixtures/alpine-310.tar.gz",
 			option: types.DockerOption{
-				Timeout:               60 * time.Second,
 				InsecureSkipTLSVerify: true,
 			},
 			wantErr: true,
@@ -161,6 +158,7 @@ func TestTLSRegistry(t *testing.T) {
 			}
 
 			assert.Equal(t, &tc.expectedOS, imageDetail.OS)
+			assert.Equal(t, &tc.expectedRepo, imageDetail.Repository)
 		})
 	}
 }
@@ -198,13 +196,13 @@ func analyze(ctx context.Context, imageRef string, opt types.DockerOption) (*typ
 	}
 	cli.NegotiateAPIVersion(ctx)
 
-	img, cleanup, err := image.NewDockerImage(ctx, imageRef, opt)
+	img, cleanup, err := image.NewContainerImage(ctx, imageRef, opt)
 	if err != nil {
 		return nil, err
 	}
 	defer cleanup()
 
-	ar, err := aimage.NewArtifact(img, c, artifact.Option{}, config.ScannerOption{})
+	ar, err := aimage.NewArtifact(img, c, artifact.Option{})
 	if err != nil {
 		return nil, err
 	}

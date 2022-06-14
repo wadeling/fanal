@@ -2,7 +2,6 @@ package binary
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -18,7 +17,6 @@ func Test_gobinaryLibraryAnalyzer_Analyze(t *testing.T) {
 		name      string
 		inputFile string
 		want      *analyzer.AnalysisResult
-		wantErr   string
 	}{
 		{
 			name:      "happy path",
@@ -29,7 +27,10 @@ func Test_gobinaryLibraryAnalyzer_Analyze(t *testing.T) {
 						Type:     types.GoBinary,
 						FilePath: "testdata/executable_gobinary",
 						Libraries: []types.Package{
-							{Name: "github.com/aquasecurity/go-pep440-version", Version: "v0.0.0-20210121094942-22b2f8951d46"},
+							{
+								Name:    "github.com/aquasecurity/go-pep440-version",
+								Version: "v0.0.0-20210121094942-22b2f8951d46",
+							},
 							{Name: "github.com/aquasecurity/go-version", Version: "v0.0.0-20210121072130-637058cfe492"},
 							{Name: "golang.org/x/xerrors", Version: "v0.0.0-20200804184101-5ec99f83aff1"},
 						},
@@ -44,26 +45,21 @@ func Test_gobinaryLibraryAnalyzer_Analyze(t *testing.T) {
 		{
 			name:      "broken elf",
 			inputFile: "testdata/broken_elf",
-			wantErr:   "unexpected EOF",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := ioutil.ReadFile(tt.inputFile)
+			f, err := os.Open(tt.inputFile)
 			require.NoError(t, err)
+			defer f.Close()
 
 			a := gobinaryLibraryAnalyzer{}
 			ctx := context.Background()
-			got, err := a.Analyze(ctx, analyzer.AnalysisTarget{
+			got, err := a.Analyze(ctx, analyzer.AnalysisInput{
 				FilePath: tt.inputFile,
-				Content:  b,
+				Content:  f,
 			})
 
-			if tt.wantErr != "" {
-				require.NotNil(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-				return
-			}
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})

@@ -14,10 +14,17 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/aquasecurity/fanal/analyzer"
-	_ "github.com/aquasecurity/fanal/analyzer/all"
 	aos "github.com/aquasecurity/fanal/analyzer/os"
-	_ "github.com/aquasecurity/fanal/hook/all"
 	"github.com/aquasecurity/fanal/types"
+	dio "github.com/aquasecurity/go-dep-parser/pkg/io"
+
+	_ "github.com/aquasecurity/fanal/analyzer/command/apk"
+	_ "github.com/aquasecurity/fanal/analyzer/language/ruby/bundler"
+	_ "github.com/aquasecurity/fanal/analyzer/os/alpine"
+	_ "github.com/aquasecurity/fanal/analyzer/os/ubuntu"
+	_ "github.com/aquasecurity/fanal/analyzer/pkg/apk"
+	_ "github.com/aquasecurity/fanal/analyzer/repo/apk"
+	_ "github.com/aquasecurity/fanal/handler/all"
 )
 
 type mockConfigAnalyzer struct{}
@@ -206,6 +213,33 @@ func TestAnalysisResult_Merge(t *testing.T) {
 			},
 		},
 		{
+			name: "alpine OS needs to be extended with apk repositories",
+			fields: fields{
+				OS: &types.OS{
+					Family: aos.Alpine,
+					Name:   "3.15.3",
+				},
+			},
+			args: args{
+				new: &analyzer.AnalysisResult{
+					Repository: &types.Repository{
+						Family:  aos.Alpine,
+						Release: "edge",
+					},
+				},
+			},
+			want: analyzer.AnalysisResult{
+				OS: &types.OS{
+					Family: aos.Alpine,
+					Name:   "3.15.3",
+				},
+				Repository: &types.Repository{
+					Family:  aos.Alpine,
+					Release: "edge",
+				},
+			},
+		},
+		{
 			name: "alpine must not be replaced with oracle",
 			fields: fields{
 				OS: &types.OS{
@@ -344,12 +378,20 @@ func TestAnalyzeFile(t *testing.T) {
 			want: &analyzer.AnalysisResult{},
 		},
 		{
+			name: "ignore permission error",
+			args: args{
+				filePath:     "/etc/alpine-release",
+				testFilePath: "testdata/no-permission",
+			},
+			want: &analyzer.AnalysisResult{},
+		},
+		{
 			name: "sad path with opener error",
 			args: args{
 				filePath:     "/lib/apk/db/installed",
 				testFilePath: "testdata/error",
 			},
-			wantErr: "unable to open a file (/lib/apk/db/installed)",
+			wantErr: "unable to open /lib/apk/db/installed",
 		},
 	}
 	for _, tt := range tests {
@@ -358,18 +400,26 @@ func TestAnalyzeFile(t *testing.T) {
 			limit := semaphore.NewWeighted(3)
 
 			got := new(analyzer.AnalysisResult)
-			a := analyzer.NewAnalyzer(tt.args.disabledAnalyzers)
+			a := analyzer.NewAnalyzerGroup(analyzer.GroupBuiltin, tt.args.disabledAnalyzers)
 
 			info, err := os.Stat(tt.args.testFilePath)
 			require.NoError(t, err)
 
 			ctx := context.Background()
-			err = a.AnalyzeFile(ctx, &wg, limit, got, "", tt.args.filePath, info, func() ([]byte, error) {
-				if tt.args.testFilePath == "testdata/error" {
-					return nil, xerrors.New("error")
-				}
-				return os.ReadFile(tt.args.testFilePath)
-			})
+			err = a.AnalyzeFile(ctx, &wg, limit, got, "", tt.args.filePath, info,
+				func() (dio.ReadSeekCloserAt, error) {
+					if tt.args.testFilePath == "testdata/error" {
+						return nil, xerrors.New("error")
+					} else if tt.args.testFilePath == "testdata/no-permission" {
+						os.Chmod(tt.args.testFilePath, 0000)
+						t.Cleanup(func() {
+							os.Chmod(tt.args.testFilePath, 0644)
+						})
+					}
+					return os.Open(tt.args.testFilePath)
+				},
+				nil, analyzer.AnalysisOptions{},
+			)
 
 			wg.Wait()
 			if tt.wantErr != "" {
@@ -432,7 +482,7 @@ func TestAnalyzeConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := analyzer.NewAnalyzer(tt.args.disabledAnalyzers)
+			a := analyzer.NewAnalyzerGroup(analyzer.GroupBuiltin, tt.args.disabledAnalyzers)
 			got := a.AnalyzeImageConfig(tt.args.targetOS, tt.args.configBlob)
 			assert.Equal(t, tt.want, got)
 		})
@@ -449,78 +499,25 @@ func TestAnalyzer_AnalyzerVersions(t *testing.T) {
 			name:     "happy path",
 			disabled: []analyzer.Type{},
 			want: map[string]int{
-				"alpine":     1,
-				"amazon":     1,
-				"apk":        1,
-				"bundler":    1,
-				"cargo":      1,
-				"centos":     1,
-				"rocky":      1,
-				"alma":       1,
-				"composer":   1,
-				"debian":     1,
-				"dpkg":       2,
-				"fedora":     1,
-				"gobinary":   1,
-				"gomod":      1,
-				"jar":        1,
-				"node-pkg":   1,
-				"npm":        1,
-				"nuget":      2,
-				"oracle":     1,
-				"photon":     1,
-				"pip":        1,
-				"pipenv":     1,
-				"poetry":     1,
-				"redhat":     1,
-				"rpm":        1,
-				"suse":       1,
-				"ubuntu":     1,
-				"yarn":       1,
-				"python-pkg": 1,
-				"gemspec":    1,
+				"alpine":   1,
+				"apk-repo": 1,
+				"apk":      1,
+				"bundler":  1,
+				"ubuntu":   1,
 			},
 		},
 		{
 			name:     "disable analyzers",
-			disabled: []analyzer.Type{analyzer.TypeAlpine, analyzer.TypeUbuntu},
+			disabled: []analyzer.Type{analyzer.TypeAlpine, analyzer.TypeApkRepo, analyzer.TypeUbuntu},
 			want: map[string]int{
-				"alpine":     0,
-				"amazon":     1,
-				"apk":        1,
-				"bundler":    1,
-				"cargo":      1,
-				"centos":     1,
-				"rocky":      1,
-				"alma":       1,
-				"composer":   1,
-				"debian":     1,
-				"dpkg":       2,
-				"fedora":     1,
-				"gobinary":   1,
-				"gomod":      1,
-				"jar":        1,
-				"node-pkg":   1,
-				"npm":        1,
-				"nuget":      2,
-				"oracle":     1,
-				"photon":     1,
-				"pip":        1,
-				"pipenv":     1,
-				"poetry":     1,
-				"redhat":     1,
-				"rpm":        1,
-				"suse":       1,
-				"ubuntu":     0,
-				"yarn":       1,
-				"python-pkg": 1,
-				"gemspec":    1,
+				"apk":     1,
+				"bundler": 1,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := analyzer.NewAnalyzer(tt.disabled)
+			a := analyzer.NewAnalyzerGroup(analyzer.GroupBuiltin, tt.disabled)
 			got := a.AnalyzerVersions()
 			fmt.Printf("%v\n", got)
 			assert.Equal(t, tt.want, got)
@@ -546,14 +543,13 @@ func TestAnalyzer_ImageConfigAnalyzerVersions(t *testing.T) {
 			name:     "disable analyzers",
 			disabled: []analyzer.Type{analyzer.TypeAlpine, analyzer.TypeApkCommand},
 			want: map[string]int{
-				"apk-command": 0,
-				"test":        1,
+				"test": 1,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := analyzer.NewAnalyzer(tt.disabled)
+			a := analyzer.NewAnalyzerGroup(analyzer.GroupBuiltin, tt.disabled)
 			got := a.ImageConfigAnalyzerVersions()
 			assert.Equal(t, tt.want, got)
 		})

@@ -27,10 +27,10 @@ type opener func() (v1.Image, error)
 
 type imageSave func(context.Context, []string) (io.ReadCloser, error)
 
-func imageOpener(ref string, f *os.File, imageSave imageSave) opener {
+func imageOpener(ctx context.Context, ref string, f *os.File, imageSave imageSave) opener {
 	return func() (v1.Image, error) {
 		// Store the tarball in local filesystem and return a new reader into the bytes each time we need to access something.
-		rc, err := imageSave(context.Background(), []string{ref})
+		rc, err := imageSave(ctx, []string{ref})
 		if err != nil {
 			return nil, xerrors.Errorf("unable to export the image: %w", err)
 		}
@@ -172,6 +172,10 @@ func (img *image) diffIDs() ([]v1.Hash, error) {
 }
 
 func (img *image) imageConfig(config *container.Config) v1.Config {
+	if config == nil {
+		return v1.Config{}
+	}
+
 	c := v1.Config{
 		AttachStderr:    config.AttachStderr,
 		AttachStdin:     config.AttachStdin,

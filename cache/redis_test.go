@@ -15,6 +15,8 @@ import (
 	"github.com/aquasecurity/fanal/types"
 )
 
+const correctHash = "sha256:24df0d4e20c0f42d3703bf1f1db2bdd77346c7956f74f423603d651e8e5ae8a7"
+
 func TestRedisCache_PutArtifact(t *testing.T) {
 	type args struct {
 		artifactID     string
@@ -67,7 +69,7 @@ func TestRedisCache_PutArtifact(t *testing.T) {
 
 			c := cache.NewRedisCache(&redis.Options{
 				Addr: addr,
-			})
+			}, 0)
 
 			err = c.PutArtifact(tt.args.artifactID, tt.args.artifactConfig)
 			if tt.wantErr != "" {
@@ -156,7 +158,7 @@ func TestRedisCache_PutBlob(t *testing.T) {
 
 			c := cache.NewRedisCache(&redis.Options{
 				Addr: addr,
-			})
+			}, 0)
 
 			err = c.PutBlob(tt.args.blobID, tt.args.blobConfig)
 			if tt.wantErr != "" {
@@ -241,7 +243,7 @@ func TestRedisCache_GetArtifact(t *testing.T) {
 
 			c := cache.NewRedisCache(&redis.Options{
 				Addr: addr,
-			})
+			}, 0)
 
 			got, err := c.GetArtifact(tt.artifactID)
 			if tt.wantErr != "" {
@@ -334,7 +336,7 @@ func TestRedisCache_GetBlob(t *testing.T) {
 
 			c := cache.NewRedisCache(&redis.Options{
 				Addr: addr,
-			})
+			}, 0)
 
 			got, err := c.GetBlob(tt.blobID)
 			if tt.wantErr != "" {
@@ -445,7 +447,7 @@ func TestRedisCache_MissingBlobs(t *testing.T) {
 
 			c := cache.NewRedisCache(&redis.Options{
 				Addr: addr,
-			})
+			}, 0)
 
 			missingArtifact, missingBlobIDs, err := c.MissingBlobs(tt.args.artifactID, tt.args.blobIDs)
 			if tt.wantErr != "" {
@@ -470,7 +472,7 @@ func TestRedisCache_Close(t *testing.T) {
 	t.Run("close", func(t *testing.T) {
 		c := cache.NewRedisCache(&redis.Options{
 			Addr: s.Addr(),
-		})
+		}, 0)
 		closeErr := c.Close()
 		require.NoError(t, closeErr)
 		time.Sleep(3 * time.Second) // give it some time
@@ -492,11 +494,69 @@ func TestRedisCache_Clear(t *testing.T) {
 	t.Run("clear", func(t *testing.T) {
 		c := cache.NewRedisCache(&redis.Options{
 			Addr: s.Addr(),
-		})
+		}, 0)
 		require.NoError(t, c.Clear())
 		for i := 0; i < 200; i++ {
 			assert.False(t, s.Exists(fmt.Sprintf("fanal::key%d", i)))
 		}
 		assert.True(t, s.Exists("foo"))
 	})
+}
+
+func TestRedisCache_DeleteBlobs(t *testing.T) {
+	type args struct {
+		blobIDs []string
+	}
+	tests := []struct {
+		name       string
+		setupRedis bool
+		args       args
+		wantKey    string
+		wantErr    string
+	}{
+		{
+			name:       "happy path",
+			setupRedis: true,
+			args: args{
+				blobIDs: []string{correctHash},
+			},
+			wantKey: "fanal::blob::" + correctHash,
+		},
+		{
+			name:       "no such host",
+			setupRedis: false,
+			args: args{
+				blobIDs: []string{"sha256:24df0d4e20c0f42d3703bf1f1db2bdd77346c7956f74f423603d651e8e5ae800"},
+			},
+			wantErr: "unable to delete blob",
+		},
+	}
+
+	// Set up Redis test server
+	s, err := miniredis.Run()
+	require.NoError(t, err)
+	defer s.Close()
+
+	s.Set(correctHash, "any string")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr := s.Addr()
+			if !tt.setupRedis {
+				addr = "dummy:16379"
+			}
+
+			c := cache.NewRedisCache(&redis.Options{
+				Addr: addr,
+			}, 0)
+
+			err = c.DeleteBlobs(tt.args.blobIDs)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
 }

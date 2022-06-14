@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/aquasecurity/fanal/analyzer/config"
 	"github.com/aquasecurity/fanal/artifact"
 	"github.com/aquasecurity/fanal/cache"
 	"github.com/aquasecurity/fanal/types"
@@ -36,8 +35,9 @@ func TestNewArtifact(t *testing.T) {
 	defer ts.Close()
 
 	type args struct {
-		rawurl string
-		c      cache.ArtifactCache
+		rawurl     string
+		c          cache.ArtifactCache
+		noProgress bool
 	}
 	tests := []struct {
 		name    string
@@ -47,23 +47,34 @@ func TestNewArtifact(t *testing.T) {
 		{
 			name: "happy path",
 			args: args{
-				rawurl: ts.URL + "/test.git",
-				c:      nil,
+				rawurl:     ts.URL + "/test.git",
+				c:          nil,
+				noProgress: false,
+			},
+		},
+		{
+			name: "happy noProgress",
+			args: args{
+				rawurl:     ts.URL + "/test.git",
+				c:          nil,
+				noProgress: true,
 			},
 		},
 		{
 			name: "sad path",
 			args: args{
-				rawurl: ts.URL + "/unknown.git",
-				c:      nil,
+				rawurl:     ts.URL + "/unknown.git",
+				c:          nil,
+				noProgress: false,
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid url",
 			args: args{
-				rawurl: "ht tp://foo.com",
-				c:      nil,
+				rawurl:     "ht tp://foo.com",
+				c:          nil,
+				noProgress: false,
 			},
 			wantErr: true,
 		},
@@ -71,7 +82,7 @@ func TestNewArtifact(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, cleanup, err := NewArtifact(tt.args.rawurl, tt.args.c, artifact.Option{}, config.ScannerOption{})
+			_, cleanup, err := NewArtifact(tt.args.rawurl, tt.args.c, artifact.Option{NoProgress: tt.args.noProgress})
 			assert.Equal(t, tt.wantErr, err != nil)
 			defer cleanup()
 		})
@@ -95,9 +106,9 @@ func TestArtifact_Inspect(t *testing.T) {
 			want: types.ArtifactReference{
 				Name: ts.URL + "/test.git",
 				Type: types.ArtifactRemoteRepository,
-				ID:   "sha256:c4924414863864534b5014027d19554842128b48eb6ea78d3d7fd8852e0f5ac4",
+				ID:   "sha256:916b097d29f94668ef0ff72242a1a4d077c4606c1035b67004c31cef7a731e42",
 				BlobIDs: []string{
-					"sha256:c4924414863864534b5014027d19554842128b48eb6ea78d3d7fd8852e0f5ac4",
+					"sha256:916b097d29f94668ef0ff72242a1a4d077c4606c1035b67004c31cef7a731e42",
 				},
 			},
 		},
@@ -108,7 +119,7 @@ func TestArtifact_Inspect(t *testing.T) {
 			fsCache, err := cache.NewFSCache(t.TempDir())
 			require.NoError(t, err)
 
-			art, cleanup, err := NewArtifact(tt.rawurl, fsCache, artifact.Option{}, config.ScannerOption{})
+			art, cleanup, err := NewArtifact(tt.rawurl, fsCache, artifact.Option{})
 			require.NoError(t, err)
 			defer cleanup()
 

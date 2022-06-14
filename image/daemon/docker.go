@@ -24,14 +24,22 @@ func DockerImage(ref name.Reference) (Image, func(), error) {
 		}
 	}()
 
-	inspect, _, err := c.ImageInspectWithRaw(context.Background(), ref.Name())
+	// <image_name>:<tag> pattern like "alpine:3.15"
+	// or
+	// <image_name>@<digest> pattern like "alpine@sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300"
+	imageID := ref.Name()
+	inspect, _, err := c.ImageInspectWithRaw(context.Background(), imageID)
 	if err != nil {
-		return nil, cleanup, xerrors.Errorf("unable to inspect the image (%s): %w", ref.Name(), err)
+		imageID = ref.String() // <image_id> pattern like `5ac716b05a9c`
+		inspect, _, err = c.ImageInspectWithRaw(context.Background(), imageID)
+		if err != nil {
+			return nil, cleanup, xerrors.Errorf("unable to inspect the image (%s): %w", imageID, err)
+		}
 	}
 
-	history, err := c.ImageHistory(context.Background(), ref.Name())
+	history, err := c.ImageHistory(context.Background(), imageID)
 	if err != nil {
-		return nil, cleanup, xerrors.Errorf("unable to get history (%s): %w", ref.Name(), err)
+		return nil, cleanup, xerrors.Errorf("unable to get history (%s): %w", imageID, err)
 	}
 
 	f, err := os.CreateTemp("", "fanal-*")
@@ -46,7 +54,7 @@ func DockerImage(ref name.Reference) (Image, func(), error) {
 	}
 
 	return &image{
-		opener:  imageOpener(ref.Name(), f, c.ImageSave),
+		opener:  imageOpener(context.Background(), imageID, f, c.ImageSave),
 		inspect: inspect,
 		history: history,
 	}, cleanup, nil

@@ -18,9 +18,9 @@ import (
 
 func TestMain(m *testing.M) {
 	imagePaths := map[string]string{
-		"index.docker.io/library/alpine:3.10": "../../test/testdata/alpine-310.tar.gz",
-		"index.docker.io/library/alpine:3.11": "../../test/testdata/alpine-311.tar.gz",
-		"gcr.io/distroless/base:latest":       "../../test/testdata/distroless.tar.gz",
+		"alpine:3.10":            "../../test/testdata/alpine-310.tar.gz",
+		"alpine:3.11":            "../../test/testdata/alpine-311.tar.gz",
+		"gcr.io/distroless/base": "../../test/testdata/distroless.tar.gz",
 	}
 
 	// for Docker
@@ -98,7 +98,15 @@ func Test_image_ConfigFile(t *testing.T) {
 						EmptyLayer: false,
 					},
 				},
-				RootFS: v1.RootFS{Type: "layers", DiffIDs: []v1.Hash{v1.Hash{Algorithm: "sha256", Hex: "beee9f30bc1f711043e78d4a2be0668955d4b761d587d6f60c2c8dc081efb203"}}},
+				RootFS: v1.RootFS{
+					Type: "layers",
+					DiffIDs: []v1.Hash{
+						{
+							Algorithm: "sha256",
+							Hex:       "beee9f30bc1f711043e78d4a2be0668955d4b761d587d6f60c2c8dc081efb203",
+						},
+					},
+				},
 				Config: v1.Config{
 					Cmd:         []string{"/bin/sh"},
 					Image:       "sha256:74df73bb19fbfc7fb5ab9a8234b3d98ee2fb92df5b824496679802685205ab8c",

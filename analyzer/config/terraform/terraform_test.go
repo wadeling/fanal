@@ -1,6 +1,7 @@
 package terraform_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -14,21 +15,25 @@ import (
 
 func TestConfigAnalyzer_Analyze(t *testing.T) {
 	tests := []struct {
-		name   string
-		target analyzer.AnalysisTarget
-		want   *analyzer.AnalysisResult
+		name  string
+		input analyzer.AnalysisInput
+		want  *analyzer.AnalysisResult
 	}{
 		{
 			name: "happy path",
-			target: analyzer.AnalysisTarget{
+			input: analyzer.AnalysisInput{
 				Dir:      "path/to/",
 				FilePath: "main.tf",
+				Content:  bytes.NewReader(nil),
 			},
 			want: &analyzer.AnalysisResult{
-				Configs: []types.Config{
-					{
-						Type:     types.Terraform,
-						FilePath: "path/to/main.tf",
+				Files: map[types.HandlerType][]types.File{
+					types.MisconfPostHandler: {
+						{
+							Type:    types.Terraform,
+							Path:    "main.tf",
+							Content: []byte{},
+						},
 					},
 				},
 			},
@@ -38,7 +43,7 @@ func TestConfigAnalyzer_Analyze(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a := terraform.ConfigAnalyzer{}
 			ctx := context.Background()
-			got, err := a.Analyze(ctx, tt.target)
+			got, err := a.Analyze(ctx, tt.input)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
