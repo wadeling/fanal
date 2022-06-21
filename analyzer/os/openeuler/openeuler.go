@@ -2,7 +2,6 @@ package openeuler
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -30,9 +29,9 @@ var requiredFiles = []string{
 
 type openeulerOSAnalyzer struct{}
 
-func (a openeulerOSAnalyzer) Analyze(_ context.Context, target analyzer.AnalysisTarget) (*analyzer.AnalysisResult, error) {
-	openeulerName:= ""
-	scanner := bufio.NewScanner(bytes.NewBuffer(target.Content))
+func (a openeulerOSAnalyzer) Analyze(_ context.Context, input analyzer.AnalysisInput) (*analyzer.AnalysisResult, error) {
+	openeulerName := ""
+	scanner := bufio.NewScanner(input.Content)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "NAME=\"openEuler") {
@@ -44,7 +43,7 @@ func (a openeulerOSAnalyzer) Analyze(_ context.Context, target analyzer.Analysis
 			return &analyzer.AnalysisResult{
 				OS: &types.OS{
 					Family: openeulerName,
-					Name:   strings.TrimSpace(line[12:len(line)-1]),
+					Name:   strings.TrimSpace(line[12 : len(line)-1]),
 				},
 			}, nil
 		}

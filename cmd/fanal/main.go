@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
@@ -211,24 +213,44 @@ func inspect(ctx context.Context, art artifact.Artifact, c cache.LocalArtifactCa
 			return err
 		}
 	}
-	fmt.Println(imageInfo.Name)
-	fmt.Printf("RepoTags: %v\n", imageInfo.ImageMetadata.RepoTags)
-	fmt.Printf("RepoDigests: %v\n", imageInfo.ImageMetadata.RepoDigests)
-	fmt.Printf("%+v\n", mergedLayer.OS)
-	fmt.Printf("via image Packages: %d\n", len(mergedLayer.Packages))
+	log.Println(imageInfo.Name)
+	log.Printf("RepoTags: %v\n", imageInfo.ImageMetadata.RepoTags)
+	log.Printf("RepoDigests: %v\n", imageInfo.ImageMetadata.RepoDigests)
+	log.Printf("%+v\n", mergedLayer.OS)
+	log.Printf("via image Packages: %d\n", len(mergedLayer.Packages))
+
+	// dump package
+	for _, v := range mergedLayer.Packages {
+		log.Printf("name:%s,version:%s,License:%s,release:%s\n", v.Name, v.Version, v.License, v.Release)
+	}
+
 	for _, app := range mergedLayer.Applications {
-		fmt.Printf("%s (%s): %d\n", app.Type, app.FilePath, len(app.Libraries))
+		log.Printf("%s (%s): %d\n", app.Type, app.FilePath, len(app.Libraries))
 	}
 
 	if len(mergedLayer.Misconfigurations) > 0 {
-		fmt.Println("Misconfigurations:")
+		log.Println("Misconfigurations:")
 	}
 	for _, misconf := range mergedLayer.Misconfigurations {
-		fmt.Printf("  %s: failures %d, warnings %d\n", misconf.FilePath, len(misconf.Failures), len(misconf.Warnings))
+		log.Printf("  %s: failures %d, warnings %d\n", misconf.FilePath, len(misconf.Failures), len(misconf.Warnings))
 		for _, failure := range misconf.Failures {
-			fmt.Printf("    %s: %s\n", failure.ID, failure.Message)
+			log.Printf("    %s: %s\n", failure.ID, failure.Message)
 		}
 	}
+
+	// dump result
+	res, err := json.Marshal(mergedLayer)
+	if err != nil {
+		log.Printf("marshal result err:%v\n", err)
+		return err
+	}
+	err = ioutil.WriteFile("fanal_res.json", res, 0644)
+	if err != nil {
+		log.Printf("write result err:%v\n", err)
+		return err
+	}
+	log.Printf("write result ok.")
+
 	return nil
 }
 
